@@ -11,9 +11,13 @@ Install with npm (`npm install three.terrain.js`) and import as an ES module.
 You also need a compatible version of [three.js](https://www.npmjs.com/package/three)
 (r160 or later) in your project.
 
+This library includes a
+[`SKILL.md` file](https://github.com/IceCreamYou/THREE.Terrain/blob/gh-pages/SKILL.md)
+to help AI agents use it. Or you can do it yourself:
+
 ```javascript
 import * as THREE from 'three';
-import Terrain, { TerrainNS, createGrass, generateBlendedMaterial, grassTextureWeight, updateGrass, updateGrassLOD } from 'three.terrain.js';
+import Terrain, { TerrainNS, createGrass, createSeededRandom, generateBlendedMaterial, grassMeshWeight, updateGrass, updateGrassLOD } from 'three.terrain.js';
 // Or from a local checkout: import Terrain, { TerrainNS, generateBlendedMaterial } from './src/index.js';
 ```
 
@@ -22,6 +26,11 @@ import Terrain, { TerrainNS, createGrass, generateBlendedMaterial, grassTextureW
   `TerrainNS.DiamondSquare`, `TerrainNS.Smooth`, `TerrainNS.ScatterMeshes`).
 - `generateBlendedMaterial` (also available as
   `TerrainNS.generateBlendedMaterial`) helps texture the terrain.
+- `createGrass` creates grass blades for terrain cover. Various options and
+  helpers support tints, clustering, density, swaying in the wind, etc.
+- `createSeededRandom` takes a seed and returns a function similar to
+  `Math.random()` which returns a deterministic sequence of random values based
+  on the seed. This can be passed as an option to other methods.
 
 ### Procedurally Generate a Terrain
 
@@ -59,30 +68,47 @@ var decoScene = TerrainNS.ScatterMeshes(geo, {
 });
 terrainScene.add(decoScene);
 
-// Add dense, instanced grass where the terrain's grass texture is visible.
+// Optional:
+// Add dense, instanced grass
 var grass = createGrass({
     bladeCount: 20,
     height: 9,
-    minimumLight: 1.85,
+    minimumLight: 0.58,
     width: 7,
 });
 var grassScene = TerrainNS.ScatterGrass(geo, {
     instanced: true,
     mesh: grass,
-    // Match the grass layer's [-80, -35, 20, 50] height blend.
-    spread: function(vertex) {
-        return grassTextureWeight(vertex.z) > 0;
+    // Keep mesh placement inside the fully grass-covered part of the
+    // generateBlendedMaterial layer (described below).
+    spread: function(vertex, faceIndex, faceNormal) {
+        return grassMeshWeight(vertex.z, faceNormal.angleTo(new THREE.Vector3(0, 0, 1))) > 0;
     },
     maxTilt: 0,
-    randomRotationAxis: 'z',
+    randomRotationAxis: 'y',
     positionJitter: 2.5,
-    tintRange: { min: 0x6f9147, max: 0xb9c95f },
+    tintRange: { min: 0x496b34, max: 0x78934a },
 });
 terrainScene.add(grassScene);
 
 // In the render loop, update wind and compact distant instances before draw.
 updateGrass(grass, elapsedSeconds);
 updateGrassLOD(grassScene, camera, 1200);
+```
+
+For repeatable terrain and decoration, pass a seeded random function through
+the `random` option.:
+
+```javascript
+var terrainScene = Terrain({
+    heightmap: TerrainNS.PerlinDiamond,
+    random: createSeededRandom(12345),
+    // ...other terrain options
+});
+var decoScene = TerrainNS.ScatterMeshes(terrainScene.children[0].geometry, {
+    mesh: new THREE.Mesh(new THREE.CylinderGeometry(2, 2, 12, 6)),
+    random: createSeededRandom(67890),
+});
 ```
 
 All parameters are optional and thoroughly documented in the
@@ -116,14 +142,19 @@ The result will look something like this:
 
 If all you need is a static terrain, the easiest way to generate a heightmap is
 to use the [demo](https://icecreamyou.github.io/THREE.Terrain/) and save the
-generated heightmap that appears in the upper-left corner. However, if you want
-to perform custom manipulations on the terrain first, you will need to export
-the heightmap yourself.
+generated heightmap that appears in the upper-left corner. The demo even has a
+"sculpt" tool to make manual modifications to the terrain. However, if you want
+to perform more custom manipulations on the terrain first, you will need to
+export the heightmap yourself.
 
 To import a heightmap, create a terrain as explained above, but pass the loaded
 heightmap image (or a canvas containing a heightmap) to the `heightmap` option
 for the `Terrain()` function (instead of passing a procedural generation
 function).
+
+Note that since the library supports seeded randomness, you may not need to
+export and import the whole terrain; instead, you might just need the seed you
+used to generate the terrain of interest.
 
 ### Dynamic Terrain Materials
 
@@ -159,8 +190,9 @@ kinds of smoothing; and more. These features are all fully documented in the
 [source code](https://github.com/IceCreamYou/THREE.Terrain/tree/gh-pages/src).
 Additionally, you can create custom methods for generating terrain or affecting
 other processes.
+
 The demo uses [`@dgreenheck/ez-tree`](https://github.com/dgreenheck/ez-tree)
-(MIT licensed) for trees.
+(MIT licensed) for trees and bushes.
 
 ### Development
 
@@ -179,6 +211,17 @@ To rebuild the library bundles in `dist/`:
 ```bash
 npm run build
 ```
+
+To run the regression suite:
+
+```bash
+npm test
+```
+
+The suite uses Node's built-in test runner and the existing Playwright
+dependency. It covers seeded terrain construction, normalization callbacks,
+analysis, blended materials, instanced grass, and browser-only heightmap
+conversion.
 
 There is also a [statistics simulation](statistics/) that compares procedural
 generation methods. Run it with `npm start` and open `/statistics/`, or see
@@ -201,5 +244,5 @@ devDependencies.
 
 ## Screenshots
 
-![Screenshot 1](https://raw.githubusercontent.com/IceCreamYou/THREE.Terrain/gh-pages/demo/img/screenshot1.jpg)
-![Screenshot 2](https://raw.githubusercontent.com/IceCreamYou/THREE.Terrain/gh-pages/demo/img/screenshot2.jpg)
+![Terrain analytics, decoration controls, and high-density wind-swept grass](https://raw.githubusercontent.com/IceCreamYou/THREE.Terrain/gh-pages/demo/img/screenshot1.jpg)
+![HUD-free beach terrain showing grass meshes and blended material layers](https://raw.githubusercontent.com/IceCreamYou/THREE.Terrain/gh-pages/demo/img/screenshot2.jpg)

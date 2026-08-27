@@ -1,6 +1,6 @@
 {
     "name": "three.terrain.js",
-    "version": "3.0.0",
+    "version": "3.1.1",
     "description": "Extends the Three.js web-based 3D graphics framework to support generating random terrains and rendering terrain from predetermined heightmaps.",
     "homepage": "https://github.com/IceCreamYou/THREE.Terrain",
     "bugs": "https://github.com/IceCreamYou/THREE.Terrain/issues",
@@ -22,7 +22,10 @@
     "scripts": {
         "start": "vite",
         "build": "vite build",
+        "test": "node --test",
+        "release": "node scripts/release.mjs",
         "preview": "vite preview",
+        "screenshots": "node scripts/capture-readme-screenshots.mjs",
         "vendor": "node scripts/vendor-deps.mjs && node scripts/build-eztree.mjs",
         "build:eztree": "node scripts/build-eztree.mjs"
     },
@@ -32,7 +35,7 @@
     },
     "repository": {
         "type": "git",
-        "url": "git://github.com/IceCreamYou/THREE.Terrain.git"
+        "url": "git+https://github.com/IceCreamYou/THREE.Terrain.git"
     },
     "keywords": [
         "THREE",
@@ -51,7 +54,8 @@
     },
     "devDependencies": {
         "dat.gui": "^0.7.9",
-        "three": "^0.184.0",
-        "vite": "^8.0.14"
+        "playwright": "^1.62.1",
+        "three": "0.185.1",
+        "vite": "8.2.2"
     }
 }

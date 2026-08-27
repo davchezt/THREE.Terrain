@@ -1,0 +1,149 @@
+name: Publish npm package
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing published stable release tag to publish
+        required: true
+        type: string
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+# No permissions are inherited by default. The publish job uses OIDC and only
+# reads repository contents.
+permissions: {}
+
+env:
+  RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.tag }}
+
+jobs:
+  verify:
+    name: Verify release contents
+    if: ${{ github.repository == 'IceCreamYou/THREE.Terrain' && (github.event_name == 'workflow_dispatch' || github.event.release.prerelease == false) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.x
+          package-manager-cache: false
+
+      - name: Derive release version from tag
+        id: release_version
+        run: |
+          set -euo pipefail
+          release_version="$(node - <<'NODE'
+          const tag = process.env.RELEASE_TAG ?? '';
+          const version = tag.startsWith('v') ? tag.slice(1) : tag;
+          const stableSemver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+          if (!stableSemver.test(version)) {
+            console.error(`Release tag is not a stable semantic version: ${JSON.stringify(tag)}`);
+            process.exit(1);
+          }
+          console.log(version);
+          NODE
+          )"
+          echo "version=$release_version" >> "$GITHUB_OUTPUT"
+
+      - name: Verify existing GitHub Release
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          release_json="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease)"
+          RELEASE_JSON="$release_json" node - <<'NODE'
+          const release = JSON.parse(process.env.RELEASE_JSON);
+          if (release.isDraft || release.isPrerelease) {
+            console.error('The selected release must be published and stable.');
+            process.exit(1);
+          }
+          NODE
+
+      - name: Verify package version
+        env:
+          RELEASE_VERSION: ${{ steps.release_version.outputs.version }}
+        run: |
+          set -euo pipefail
+          package_version="$(node -p "require('./package.json').version")"
+          if [ "$package_version" != "$RELEASE_VERSION" ]; then
+            echo "::error::package.json has version $package_version, but the release tag has version $RELEASE_VERSION."
+            exit 1
+          fi
+
+      # This repository does not track package-lock.json. Install the declared
+      # Vite version exactly so the generated bundles are reproducible.
+      - name: Install build dependencies
+        run: |
+          set -euo pipefail
+          vite_version="$(node - <<'NODE'
+          const spec = require('./package.json').devDependencies?.vite ?? '';
+          const match = spec.match(/^(?:[~^=])?(\d+\.\d+\.\d+)$/);
+          if (!match) {
+            console.error(`Unsupported Vite version specification: ${JSON.stringify(spec)}`);
+            process.exit(1);
+          }
+          console.log(match[1]);
+          NODE
+          )"
+          npm install --ignore-scripts --no-audit --no-fund --package-lock=false --no-save "vite@$vite_version"
+
+      - name: Rebuild and verify committed dist
+        run: |
+          set -euo pipefail
+          npm run build
+          if ! git diff --quiet -- dist/; then
+            echo "::error::dist/ changed when rebuilt. Commit the generated dist/ before creating the release."
+            git diff --stat -- dist/
+            exit 1
+          fi
+
+  publish:
+    name: Publish package
+    needs: verify
+    if: ${{ github.repository == 'IceCreamYou/THREE.Terrain' && (github.event_name == 'workflow_dispatch' || github.event.release.prerelease == false) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: npm-release
+      url: https://www.npmjs.com/package/three.terrain.js
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.x
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Preview package contents
+        run: npm pack --dry-run --ignore-scripts
+
+      # Trusted Publishing uses this job's OIDC token and adds npm provenance
+      # automatically. Do not replace it with an npm token secret.
+      - name: Publish through npm Trusted Publishing
+        run: npm publish --ignore-scripts
